@@ -1,8 +1,4 @@
-"""回合出手顺序：按速度降序排，被控制的角色占位但跳过。
-
-缺陷：同速按加入顺序而不是名字升序、被控制的角色直接从顺序里删掉、同一个 round_id 重复结算会重算、
-每次结算全扫角色表。
-"""
+"""回合出手顺序：按速度降序排，速度相同按名字升序，被控制的角色占位但跳过。"""
 
 
 class Order:
@@ -13,24 +9,38 @@ class Order:
         self.stunned = set()
         self.rounds = {}
         self.scanned = 0
+        self._order = None
 
     def add(self, name, speed):
         """加入一个角色。"""
         self.units[name] = speed
+        self._order = None
 
     def set_speed(self, name, speed):
         """改速度（可能来自状态修正）。"""
         self.units[name] = speed
+        self._order = None
 
     def stun(self, name):
         """把角色标记为被控制。"""
         self.stunned.add(name)
+        self._order = None
 
     def resolve(self, round_id):
         """结算这一轮的出手顺序，返回 (名字, 是否跳过) 列表。
 
-        缺陷：同速按加入顺序、被控的删掉、不按 round_id 幂等、全扫角色表。
+        同一个 round_id 只结算一次：重复调用直接返回上一次的顺序。
+        不同轮次按当前速度重新排序；只有状态发生变化后才需要重新扫描角色表，
+        连续结算不随角色数乘结算次数增长。
         """
-        self.scanned += len(self.units)
-        names = sorted(self.units, key=lambda name: -self.units[name])
-        return [(name, False) for name in names if name not in self.stunned]
+        if round_id in self.rounds:
+            return self.rounds[round_id]
+        if self._order is None:
+            self.scanned += len(self.units)
+            self._order = tuple(
+                (name, name in self.stunned)
+                for name in sorted(self.units, key=lambda name: (-self.units[name], name))
+            )
+        order = self._order
+        self.rounds[round_id] = order
+        return order
